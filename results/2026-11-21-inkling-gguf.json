@@ -1,0 +1,4 @@
+{"model":"inkling-gguf","label":"Inkling 2 Mini (AD-IQ3_XXS GGUF, llama.cpp)","file":"Inkling-2-Mini-AD-IQ3_XXS.gguf","engine":"llama-b12600","args":"-c 98304 -fa on -ctk q8_0 -ctv q8_0 -ub 32 -b 2048 -np 1 -ngl 99 --jinja",
+ "machine":{"chip":"Apple M4","gpu_cores":"10","ram_gb":16,"macos":"26.5.1"},
+ "decode_tok_s":17.25,"decode_runs":"17.4 17.4 17.3 17.0 16.0","prefill":[{"tokens":4086,"tok_s":67.6},{"tokens":16345,"tok_s":60.5}],"depth":{"tokens":32726,"prefill_tok_s":47.4,"ttft_s":690,"decode_tok_s":12.2,"needle":"pass"},
+ "qa":"12/12","mem_free_pct":"1%","date":"2026-11-21T11:33:46Z"}

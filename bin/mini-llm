@@ -1,0 +1,156 @@
+#!/bin/bash
+# mini-llm: run and benchmark local models installed by the recipe.
+# Usage: mini-llm status | start | stop | restart | use <inkling|inkling-gguf|bonsai> | bench [opts] | qa | logs | serve | uninstall
+set -euo pipefail
+
+PREFIX="${MINI_LLM_PREFIX:-$HOME/.mini-llm}"
+SRC="$PREFIX/recipe"
+LABEL=com.mini-llm.server
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+[ -f "$PREFIX/settings" ] && . "$PREFIX/settings"
+PORT="${PORT:-8080}"
+HOST="${HOST:-127.0.0.1}"
+
+die() { echo "mini-llm: $*" >&2; exit 1; }
+active() { cat "$PREFIX/active" 2>/dev/null || echo inkling; }
+load_model() {
+  local k="${1:-$(active)}"
+  [ -f "$SRC/models/$k.conf" ] || die "unknown model '$k' (have: $(ls "$SRC/models" | sed 's/.conf//' | tr '\n' ' '))"
+  # shellcheck disable=SC1090
+  . "$SRC/models/$k.conf"
+}
+listening() { lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; }
+healthy() { curl -sf "http://$HOST:$PORT/health" >/dev/null 2>&1; }
+wait_ready() {
+  printf "loading %s" "$MODEL_LABEL"
+  for _ in $(seq 240); do
+    if healthy; then echo " ready"; return 0; fi
+    printf "."; sleep 1
+  done
+  echo; die "server did not become ready in 4 min; see: mini-llm logs"
+}
+
+omlx_python() { for p in /opt/homebrew/opt/omlx/libexec/bin/python /usr/local/opt/omlx/libexec/bin/python; do
+  [ -x "$p" ] && { echo "$p"; return 0; }; done; return 1; }
+installed() { # is the loaded model's engine + files present?
+  if [ "${ENGINE_TYPE:-llama}" = mlx ]; then
+    omlx_python >/dev/null && [ -f "$PREFIX/models/$MODEL_DIR/.verified" ]
+  else
+    [ -x "$PREFIX/engines/$ENGINE/llama-server" ] && [ -f "$PREFIX/models/$MODEL_FILE" ]
+  fi
+}
+
+cmd_serve() {
+  load_model
+  if [ "${ENGINE_TYPE:-llama}" = mlx ]; then
+    local py; py="$(omlx_python)" || die "oMLX missing (brew install jundot/omlx/omlx), or re-run the installer"
+    [ -f "$PREFIX/models/$MODEL_DIR/.verified" ] || die "model $MODEL_DIR missing; run: mini-llm use $MODEL_KEY"
+    exec "$py" -I "$SRC/engine/inkserve.py" --model "$PREFIX/models/$MODEL_DIR" --alias "$MODEL_ID" \
+      --host "$HOST" --port "$PORT" --ctx "${CTX:-98304}" --expect-omlx "${OMLX_VERSION:-}" ${EXTRA_ARGS:-}
+  fi
+  local bin="$PREFIX/engines/$ENGINE/llama-server" model="$PREFIX/models/$MODEL_FILE"
+  [ -x "$bin" ] || die "engine $ENGINE missing; re-run the installer"
+  [ -f "$model" ] || die "model $MODEL_FILE missing; run: mini-llm use $MODEL_KEY"
+  # shellcheck disable=SC2086
+  exec "$bin" -m "$model" --alias "$MODEL_ID" --host "$HOST" --port "$PORT" $SERVER_ARGS ${EXTRA_ARGS:-}
+}
+
+write_plist() {
+  mkdir -p "$HOME/Library/LaunchAgents" "$PREFIX/logs"
+  cat > "$PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>$LABEL</string>
+  <key>ProgramArguments</key><array><string>$PREFIX/bin/mini-llm</string><string>serve</string></array>
+  <key>EnvironmentVariables</key><dict><key>MINI_LLM_PREFIX</key><string>$PREFIX</string></dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+  <key>ThrottleInterval</key><integer>30</integer>
+  <key>ProcessType</key><string>Interactive</string>
+  <key>StandardOutPath</key><string>$PREFIX/logs/server.log</string>
+  <key>StandardErrorPath</key><string>$PREFIX/logs/server.log</string>
+</dict></plist>
+EOF
+}
+
+cmd_start() {
+  load_model
+  if healthy; then echo "already running on http://$HOST:$PORT ($(active))"; return 0; fi
+  listening && die "port $PORT is taken by another program (set PORT in $PREFIX/settings)"
+  check_wired
+  write_plist
+  : > "$PREFIX/logs/server.log"
+  launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null || launchctl kickstart -k "gui/$(id -u)/$LABEL"
+  wait_ready
+  echo "endpoint  http://$HOST:$PORT/v1   model  $MODEL_ID"
+}
+
+cmd_stop() {
+  launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
+  for _ in $(seq 30); do listening || { echo "stopped"; return 0; }; sleep 1; done
+  echo "server still listening on $PORT (not started by mini-llm?)"
+}
+
+check_wired() {
+  load_model
+  local mem_mb lim need
+  mem_mb=$(( $(sysctl -n hw.memsize) / 1048576 ))
+  lim=$(sysctl -n iogpu.wired_limit_mb 2>/dev/null || echo 0)
+  need=${GPU_MB:-$(( MODEL_BYTES / 1048576 + 2000 ))}
+  if [ "$lim" -eq 0 ]; then lim=$(( mem_mb * 2 / 3 )); fi   # macOS default for <= 36 GB machines
+  if [ "$lim" -lt "$need" ]; then
+    echo "warning: the GPU may use only ~$lim MB; $MODEL_KEY needs ~$need MB."
+    echo "         raise it (resets at reboot unless you installed the boot fix):"
+    echo "         sudo sysctl iogpu.wired_limit_mb=14500"
+  fi
+}
+
+cmd_status() {
+  local a; a=$(active); load_model "$a"
+  echo "prefix    $PREFIX"
+  echo "active    $a  ($MODEL_LABEL)"
+  echo "installed $(for f in "$SRC"/models/*.conf; do (. "$f"; installed && printf '%s ' "$MODEL_KEY"); done)"
+  echo "gpu limit $(sysctl -n iogpu.wired_limit_mb 2>/dev/null) MB (0 = macOS default)"
+  if healthy; then
+    echo "server    up  http://$HOST:$PORT/v1  (model id $MODEL_ID)"
+  elif listening; then echo "server    loading or busy on port $PORT"
+  else echo "server    stopped  (mini-llm start)"; fi
+}
+
+cmd_use() {
+  local k="${1:-}"; [ -n "$k" ] || die "usage: mini-llm use <$(ls "$SRC/models" | sed 's/.conf//' | tr '\n' '|' | sed 's/|$//')>"
+  load_model "$k"
+  if ! installed; then
+    bash "$SRC/install.sh" --prefix "$PREFIX" --models "$k" --no-start --no-wired-limit --no-path
+  fi
+  echo "$k" > "$PREFIX/active"
+  cmd_stop >/dev/null
+  cmd_start
+}
+
+cmd_logs() { tail -n "${1:-60}" "$PREFIX/logs/server.log"; }
+
+cmd_uninstall() {
+  cmd_stop || true
+  rm -f "$PLIST"
+  echo "Removed the login service. To delete the models and engines too:"
+  echo "  rm -rf \"$PREFIX\""
+  echo "If you installed the GPU-limit boot fix: sudo launchctl bootout system/com.mini-llm.wiredlimit; sudo rm /Library/LaunchDaemons/com.mini-llm.wiredlimit.plist"
+}
+
+c="${1:-status}"; shift || true
+case "$c" in
+  serve) cmd_serve ;;
+  start) cmd_start ;;
+  stop) cmd_stop ;;
+  restart) cmd_stop >/dev/null; cmd_start ;;
+  status) cmd_status ;;
+  use) cmd_use "$@" ;;
+  bench) load_model; PORT="$PORT" HOST="$HOST" exec bash "$SRC/bench/bench.sh" "$@" ;;
+  qa) load_model; PORT="$PORT" HOST="$HOST" exec bash "$SRC/bench/bench.sh" --qa-only "$@" ;;
+  logs) cmd_logs "$@" ;;
+  uninstall) cmd_uninstall ;;
+  -h|--help|help) sed -n '2,3p' "$0" | sed 's/^# //' ;;
+  *) die "unknown command '$c' (mini-llm help)" ;;
+esac

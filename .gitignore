@@ -1,0 +1,4 @@
+*.gguf
+*.part
+*.tar.gz
+.DS_Store

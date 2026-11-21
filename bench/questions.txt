@@ -1,0 +1,12 @@
+What is the capital of Australia? Answer with one word.|canberra
+What is 17 * 23? Answer with the number only.|391
+A train leaves at 3:40 pm and the trip takes 2 hours 35 minutes. What time does it arrive? Answer like 6:15 pm.|6:15
+Which planet is known as the Red Planet? One word.|mars
+What is the chemical symbol for sodium?|na
+If a shirt costs 40 dollars and is discounted 25 percent, what is the sale price in dollars? Number only.|30
+Who wrote the play Romeo and Juliet? Last name only.|shakespeare
+What is the square root of 144? Number only.|12
+In Python, what does len([1, 2, 3, 4]) return? Number only.|4
+What port does HTTPS use by default? Number only.|443
+Sam has 3 boxes with 12 apples each. He gives away 9 apples. How many are left? Number only.|27
+What is the largest ocean on Earth? Two words.|pacific

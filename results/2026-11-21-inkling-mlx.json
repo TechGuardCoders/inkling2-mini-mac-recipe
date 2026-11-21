@@ -1,0 +1,4 @@
+{"model":"inkling","label":"Inkling 2 Mini (oQ2.5e MLX, inkserve)","file":"mlx-community/Inkling-2-Mini-oQ2.5e-mtp@d4a4f3f555fdf6f06102de1865d07e8ac5effe6d","engine":"omlx 0.8.2","args":"ctx 98304",
+ "machine":{"chip":"Apple M4","gpu_cores":"10","ram_gb":16,"macos":"26.5.1"},
+ "decode_tok_s":22.43,"decode_runs":"22.3 22.3 22.5 22.5 22.4","prefill":[{"tokens":4086,"tok_s":190.4},{"tokens":16345,"tok_s":175.2}],"depth":{"tokens":32726,"prefill_tok_s":161.9,"ttft_s":202,"decode_tok_s":17.9,"needle":"pass"},
+ "qa":"12/12","mem_free_pct":"10%","date":"2026-11-21T14:46:39Z"}
