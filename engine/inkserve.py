@@ -8,7 +8,9 @@ cache layout a 16 GB Mac needs:
 - the 8 global visits keep full history as 8-bit affine K/V (group 64),
   allocated once at --ctx, ~17 KB/token;
 - decode attention on the global visits runs a split-K Metal kernel straight
-  from the 8-bit codes (q8attn.py) once the context passes FLASH_MIN tokens.
+  from the 8-bit codes (q8attn.py) once the context passes FLASH_MIN tokens;
+- fewer bytes per token: the loop controllers stay bf16 (oMLX upcasts them to
+  fp32) and the 8-bit output head is requantized to 6 bits (--head-bits).
 
 API: llama-server style /health and /completion (with "timings"), and OpenAI
 style /v1/models and /v1/chat/completions (streaming, reasoning_content,
@@ -31,7 +33,7 @@ import mlx.core as mx  # noqa: E402
 from mlx_lm.models.cache import ArraysCache, CacheList, KVCache  # noqa: E402
 from mlx_lm.sample_utils import make_sampler  # noqa: E402
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 log = logging.getLogger("inkserve")
 
 # Below this many cached keys the plain MLX-ops path decodes faster end to end:
@@ -194,8 +196,53 @@ def install_attend_patch():
     ink.Inkling2Attention.attend = attend
 
 
+def install_bf16_loop_patch():
+    """The loop controllers (loop_down, loop_gain_forget) are bf16 weights that
+    oMLX keeps as fp32 copies: ~0.23 GB read per token in the looped layers.
+    Keep them bf16 and run the two small matmuls in bf16 (fp32 accumulation
+    inside the matmul, one bf16 rounding, as the reference does). Greedy tokens
+    were identical to the fp32 path on our checks; decode +0.4 tok/s."""
+    from omlx.patches.inkling2 import model as ink
+
+    def _mix_messages(x, message, down, gain_forget):
+        n, b, length, hidden = x.shape
+        rows = b * length
+        z = mx.stack([ink._unit_rms(x), ink._unit_rms(message)], axis=1)
+        z = z.astype(mx.bfloat16).reshape(2 * n, rows, hidden)
+        low = (z @ down.reshape(2 * n, hidden, -1)).astype(mx.float32)
+        low = low.reshape(n, 2, rows, -1).sum(axis=1).astype(mx.bfloat16)
+        gates = (low @ gain_forget).astype(mx.float32).reshape(n, b, length, 2 * hidden)
+        gain = mx.tanh(gates[..., :hidden])
+        forget = mx.tanh(gates[..., hidden:])
+        return (1.0 - forget) * x + gain * message
+
+    ink._mix_messages = _mix_messages
+
+
+def shrink_weights(model, head_bits):
+    """bf16 loop controllers; optionally requantize the 8-bit output head.
+    6-bit head: mean KL 0.00027 against the 8-bit head (8-bit requantized to
+    itself: 0.00008), top-1 98.9% (99.5%); decode +0.7 tok/s on a base M4."""
+    import mlx.nn as nn
+
+    for layer in model.model.layers:
+        if hasattr(layer, "loop_down"):
+            layer.loop_down = layer.loop_down.astype(mx.bfloat16)
+            layer.loop_gain_forget = layer.loop_gain_forget.astype(mx.bfloat16)
+    head = model.lm_head
+    if head_bits and head_bits != getattr(head, "bits", head_bits):
+        w = mx.dequantize(head.weight, head.scales, head.biases,
+                          group_size=head.group_size, bits=head.bits)
+        q = nn.QuantizedLinear(w.shape[1], w.shape[0], bias=False, group_size=64, bits=head_bits)
+        q.weight, q.scales, q.biases = mx.quantize(w, group_size=64, bits=head_bits)
+        model.lm_head = q
+        del w
+    mx.eval(model.parameters())
+    mx.clear_cache()
+
+
 class Engine:
-    def __init__(self, model_path, ctx, prefill_chunk, expect_omlx=""):
+    def __init__(self, model_path, ctx, prefill_chunk, expect_omlx="", head_bits=6):
         log.info("inkserve %s on oMLX %s", __version__, check_omlx(expect_omlx))
         from omlx.utils.model_loading import load_text_model
 
@@ -203,9 +250,11 @@ class Engine:
         mx.set_wired_limit(int(info["max_recommended_working_set_size"]))
         mx.set_cache_limit(512 * 2**20)
         install_attend_patch()
+        install_bf16_loop_patch()
         self.model_path = model_path
         self.model, self.tok = load_text_model(model_path)
         mx.eval(self.model.parameters())
+        shrink_weights(self.model, head_bits)
         self.ctx = ctx
         self.chunk = prefill_chunk
         self.lock = threading.Lock()
@@ -610,11 +659,13 @@ def main():
     ap.add_argument("--ctx", type=int, default=98304)
     ap.add_argument("--prefill-chunk", type=int, default=256)
     ap.add_argument("--expect-omlx", default="", help="oMLX version this was tested with")
+    ap.add_argument("--head-bits", type=int, default=6, choices=(4, 5, 6, 8),
+                    help="requantize the 8-bit output head (6: near-lossless, faster)")
     a = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     global WORKER
     MODEL_ID = a.alias
-    WORKER = EngineThread(a.model, a.ctx, a.prefill_chunk, a.expect_omlx)
+    WORKER = EngineThread(a.model, a.ctx, a.prefill_chunk, a.expect_omlx, a.head_bits)
     WORKER.start()
     WORKER.ready.wait()
     if WORKER.error is not None:
