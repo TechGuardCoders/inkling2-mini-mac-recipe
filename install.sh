@@ -34,6 +34,23 @@ while [ $# -gt 0 ]; do
 done
 MODELS="$(echo "$MODELS" | tr ',' ' ')"
 
+# This recipe grew into Nuemac (github.com/TechGuardCoders/nuemac), which serves Inkling 2 Mini on its own
+# engine. The default install forwards there; --models inkling-gguf / bonsai still install the comparison
+# builds below.
+if [ "$MODELS" = "inkling" ] && [ "${MINI_LLM_LEGACY:-0}" != 1 ]; then
+  FWD=()
+  [ -n "$PORT" ] && FWD+=(--port "$PORT")
+  [ "$START" = 0 ] && FWD+=(--no-start)
+  [ "$WIRED" = 0 ] && FWD+=(--no-wired-limit)
+  [ "$ADDPATH" = 0 ] && FWD+=(--no-path)
+  [ "$DRY" = 1 ] && FWD+=(--dry-run)
+  printf '[1m%s[0m
+' "This recipe is now Nuemac: installing it (github.com/TechGuardCoders/nuemac)"
+  NUEMAC_INSTALL="$(mktemp)"
+  curl -fsSL https://raw.githubusercontent.com/TechGuardCoders/nuemac/main/install.sh -o "$NUEMAC_INSTALL"     || { echo "could not download the Nuemac installer" >&2; exit 1; }
+  exec bash "$NUEMAC_INSTALL" "${FWD[@]+"${FWD[@]}"}"
+fi
+
 b() { printf '\033[1m%s\033[0m\n' "$*"; }
 die() { printf '\033[31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 ask() { # question -> 0 for yes; needs a terminal (works under curl | bash via /dev/tty)

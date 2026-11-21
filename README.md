@@ -1,5 +1,10 @@
 # Inkling 2 Mini on a 16 GB Mac mini
 
+> **This project is now [Nuemac](https://github.com/TechGuardCoders/nuemac)**, a local LLM engine for
+> memory-tight Macs with Inkling 2 Mini as its first supported model (23.5 tok/s at 96K on a 16 GB M4 Mac mini).
+> The install command below now installs Nuemac. `--models inkling-gguf` and `--models bonsai` still install the
+> llama.cpp comparison builds from this repo.
+
 <p align="center"><img src="docs/assets/infographic.png" alt="Inkling 2 Mini: 22.4 tok/s at 96K context on a base 16 GB M4 Mac mini" width="820"></p>
 
 Thinking Machines' [Inkling 2 Mini](https://huggingface.co/thinkingmachines/Inkling-2-Mini) with a **96K-token
