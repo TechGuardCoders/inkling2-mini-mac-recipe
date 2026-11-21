@@ -8,7 +8,7 @@ cache layout a 16 GB Mac needs:
 - the 8 global visits keep full history as 8-bit affine K/V (group 64),
   allocated once at --ctx, ~17 KB/token;
 - decode attention on the global visits runs a split-K Metal kernel straight
-  from the 8-bit codes (q8attn.py).
+  from the 8-bit codes (q8attn.py) once the context passes FLASH_MIN tokens.
 
 API: llama-server style /health and /completion (with "timings"), and OpenAI
 style /v1/models and /v1/chat/completions (streaming, reasoning_content,
@@ -31,11 +31,13 @@ import mlx.core as mx  # noqa: E402
 from mlx_lm.models.cache import ArraysCache, CacheList, KVCache  # noqa: E402
 from mlx_lm.sample_utils import make_sampler  # noqa: E402
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 log = logging.getLogger("inkserve")
 
-FLASH_MIN = 8192  # below this many keys the quantized_matmul path is faster
-
+# Below this many cached keys the plain MLX-ops path decodes faster end to end:
+# the custom kernel's own time is lower at every depth, but on a base M4 it cost
+# ~1.4 ms per token at short context (measured A/B), more than it saves there.
+FLASH_MIN = 12288
 
 class WindowKVCache(KVCache):
     """Sliding-window visit: keeps the last window-1 keys plus the new ones,

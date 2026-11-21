@@ -173,7 +173,7 @@ footer img{height:16px;opacity:.8}
     <p class="intro">The full log, with every experiment and its control, is in <a href="https://github.com/TechGuardCoders/inkling2-mini-mac-recipe/blob/main/docs/RECIPE.md">docs/RECIPE.md</a>.</p>
     <div class="findings">
       <div class="card"><h3>48 caches where 8 will do</h3><p>Inkling makes 48 layer passes per token, and 40 of them only look back 1,024 tokens. oMLX kept a full-length cache on all 48 (~192 KB per token), so it fit only ~7K tokens. Window caches on those 40 passes give the same output.</p></div>
-      <div class="card"><h3>An 8-bit cache needs its own kernel</h3><p>The 8 global passes store 8-bit keys and values (1.6 GB at 96K). Plain MLX ops read them at ~23 GB/s. A split-K Metal kernel reads them at ~77 GB/s: 22 ms per token at 96K instead of 73.</p></div>
+      <div class="card"><h3>An 8-bit cache needs its own kernel</h3><p>The 8 global passes store 8-bit keys and values (1.6 GB at 96K). Plain MLX ops read them at ~23 GB/s. A split-K Metal kernel reads them at ~84 GB/s: 20 ms per token at 96K instead of 73.</p></div>
       <div class="card"><h3>Pick the right GGUF</h3><p>For llama.cpp, unsloth's Mainline IQ3_XXS loads and runs fast, but its output is garbage on master (perplexity 43 against 3.26). AtomicChat's AD-IQ3_XXS is correct.</p></div>
       <div class="card"><h3>The drafter works, and doesn't help</h3><p>Inkling's own DSpark draft head is accepted 56-76% of the time on MLX. Checking two tokens still costs ~1.8× one step, because they route to nearly twice the experts. On a base M4 it's a wash.</p></div>
     </div>

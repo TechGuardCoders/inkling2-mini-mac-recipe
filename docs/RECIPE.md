@@ -37,13 +37,51 @@ about 2.5 GiB, and the cache was using ~192 KB per token.
    ~23 GB/s on a single query against a long cache: 73 ms per token at 96K across the 8 visits. inkserve's
    split-K ("flash decoding") Metal kernel, `engine/q8attn.py`, spreads the keys over many threadgroups, one
    coalesced 128-byte read per key row, with Inkling's relative-position bias and attention sink folded in:
-   22 ms at 96K (~77 GB/s), 7.9 ms at 32K. Below 8K keys the plain path is faster and is used instead.
+   20.3 ms at 96K (~84 GB/s), 7.1 ms at 32K. inkserve uses it once the context passes 12K tokens; below
+   that the plain path decodes faster end to end (see below).
 
 | global attention, one decode step (8 visits) | 16K | 32K | 96K |
 | --- | --- | --- | --- |
 | bf16, MLX SDPA (oMLX's path) | 6.6 ms | 17.3 ms | 65.4 ms |
 | 8-bit, `quantized_matmul` | 6.1 ms | 17.9 ms | 73.2 ms |
-| **8-bit, inkserve split-K kernel** | **4.2 ms** | **7.9 ms** | **22.3 ms** |
+| 8-bit, inkserve kernel, first version | 4.2 ms | 7.9 ms | 22.3 ms |
+| **8-bit, inkserve kernel, current** | **3.9 ms** | **7.1 ms** | **20.3 ms** |
+| reading the same bytes once (floor) | | | 15.4 ms |
+
+### Tuning the kernel
+
+The M4's spec is 120 GB/s. A plain MLX reduction over the same 1.71 GB reads it in 15.4 ms (~111 GB/s), and
+that is the practical floor. The first kernel took 22.3 ms (77 GB/s). Timing each piece showed where the rest
+went. About 1.7 ms was the partial merge, run as ~8 small MLX ops per visit. The rest was the main loop
+waiting: one key's loads were issued only after the previous key's reduce-max-exp chain, and every key paid
+for a rescale.
+
+| change | 96K | kept? |
+| --- | --- | --- |
+| merge and sink in one Metal kernel instead of MLX ops | -1.0 ms | yes |
+| issue the next key's loads before this key's math (prefetch 1) | -1.4 ms | yes |
+| rescale only when a key beats the running max (uniform branch) | -0.4 ms | yes |
+| store K/V scale and bias interleaved per row: one 8-byte read, not four | -0.3 ms | no: within noise end to end |
+| prefetch 2 keys | +0.4 ms | no (registers) |
+| 16-byte reads, 4 keys per simdgroup | +1.8 ms | no (registers) |
+| block softmax over 4-16 keys | +4 to +64 ms | no (registers spill) |
+| chunk 512-4096 keys, 2-8 simdgroups | within 1 ms | chunk picked by depth |
+
+The remaining ~5 ms to the floor is instruction latency: three cross-lane sums per key on a 10-core GPU. The
+next steps there: reduce the three heads' sums together (fewer shuffles), let one lane own one key for the
+scores (no cross-lane sums at all), or compute scores as small matrix multiplies (simdgroup matrices).
+
+**Kernel time is not decode time.** The kernel is faster than the plain MLX path at every depth in isolation,
+even with the 8 visits chained back to back as the model runs them (0.66 against 0.68 ms at 400 tokens).
+Yet in an alternating end-to-end A/B on the server, using it at every depth cost ~0.8 tok/s at short context
+(21.6 against 22.4), while gaining ~0.5 tok/s at 32K. Swapping one piece at a time in one loaded process
+pinned it on the kernel's presence at short context: about 1.4 ms per token, more than its own run time.
+So inkserve switches to it above 12K tokens. With that threshold the end-to-end A/B is neutral: short
+context 22.36 / 22.41 against 22.50 / 22.38, and 32K decode 17.2 / 17.4 against 17.3 / 17.3. The kernel's
+0.8 ms saving at 32K is inside run-to-run noise. Lesson: measure the whole token, A/B alternating, before
+trusting a kernel benchmark. The one variant that decoded faster at 32K end to end (18.0 / 18.3) was the
+packed-scale cache, which issues fewer small write operations per token. That points at per-operation
+overhead, which is next on the list.
 
 Why a separate server rather than a patch to oMLX's: oMLX's batch engine merges every request's cache into
 mlx-lm batch caches and its SSD prefix cache slices caches by token position, and neither fits a window cache.

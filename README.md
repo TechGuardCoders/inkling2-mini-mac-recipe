@@ -44,7 +44,7 @@ changes three things:
    and so fits only ~7K tokens on 16 GB. Output is token-for-token identical.
 2. **8-bit keys and values on the 8 global passes**, allocated once: 1.6 GB at 96K.
 3. **A split-K Metal decode kernel** ([`engine/q8attn.py`](engine/q8attn.py)) that reads that 8-bit cache directly:
-   22 ms per token at 96K against 73 ms for plain MLX ops.
+   20 ms per token at 96K (~84 GB/s on a 120 GB/s chip) against 73 ms for plain MLX ops.
 
 Every experiment, with its control, is in [docs/RECIPE.md](docs/RECIPE.md). That includes:
 - why the drafter doesn't help on this chip;
