@@ -1,7 +1,7 @@
 # Inkling 2 Mini on a 16 GB Mac mini
 
 > **This project is now [Nuemac](https://github.com/TechGuardCoders/nuemac)**, a local LLM engine for
-> memory-tight Macs with Inkling 2 Mini as its first supported model (23.5 tok/s at 96K on a 16 GB M4 Mac mini).
+> memory-tight Macs with Inkling 2 Mini as its first supported model (25.9 tok/s at 96K on a 16 GB M4 Mac mini, up to 4 requests at once).
 > The install command below now installs Nuemac. `--models inkling-gguf` and `--models bonsai` still install the
 > llama.cpp comparison builds from this repo.
 
@@ -92,7 +92,7 @@ curl http://127.0.0.1:8080/v1/chat/completions -H 'Content-Type: application/jso
 ```
 
 Any OpenAI-compatible client works with base URL `http://127.0.0.1:8080/v1`; the API key can be anything. The
-MLX server supports streaming, `reasoning_content` and tool calls. It serves one request at a time and keeps the
+MLX server supports streaming, `reasoning_content` and tool calls. It runs up to 4 requests at once and keeps each
 conversation's cache, so a new turn only processes its new tokens. `reasoning_effort` (`low`, `medium`, `high`)
 goes in the request or in `chat_template_kwargs`.
 
