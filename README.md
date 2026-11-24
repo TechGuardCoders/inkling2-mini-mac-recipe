@@ -1,11 +1,20 @@
 # Inkling 2 Mini on a 16 GB Mac mini
 
-> **This project is now [Nuemac](https://github.com/TechGuardCoders/nuemac)**, a local LLM engine for
-> memory-tight Macs with Inkling 2 Mini as its first supported model (25.9 tok/s at 96K on a 16 GB M4 Mac mini, up to 4 requests at once).
-> The install command below now installs Nuemac. `--models inkling-gguf` and `--models bonsai` still install the
-> llama.cpp comparison builds from this repo.
+> **This project is now [Nuemac](https://github.com/TechGuardCoders/nuemac)**: go there for the install, the
+> numbers and the docs. On a base 16 GB M4 Mac (Mac mini, MacBook Air, MacBook Pro 14", iMac), Nuemac runs our own
+> 11 GB quant of Inkling 2 Mini ([Hugging Face](https://huggingface.co/Techguardai/Inkling-2-Mini-TG-MLX), 94.2%
+> next-token match to the full model) at **27.1 tok/s** with a **96K-token context**, reads images, and serves up to
+> 4 requests at once (37 tok/s combined).
+>
+> ```bash
+> curl -fsSL https://raw.githubusercontent.com/TechGuardCoders/nuemac/main/install.sh | bash
+> ```
+>
+> This repo's install command below forwards to the same installer. `--models inkling-gguf` and `--models bonsai`
+> still install the llama.cpp comparison builds from this repo. Everything below is this recipe's history
+> (measured 2026-11-21, before Nuemac).
 
-<p align="center"><img src="docs/assets/infographic.png" alt="Inkling 2 Mini: 22.4 tok/s at 96K context on a base 16 GB M4 Mac mini" width="820"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/TechGuardCoders/nuemac/main/docs/assets/infographic.png" alt="Nuemac: Inkling 2 Mini at 27.1 tok/s with a 96K context and images on a base 16 GB M4 Mac mini, 94% match to the full model, up to 4 requests at once" width="820"></p>
 
 Thinking Machines' [Inkling 2 Mini](https://huggingface.co/thinkingmachines/Inkling-2-Mini) with a **96K-token
 context** on a **base M4 Mac mini with 16 GB**, as a local OpenAI-compatible server. One command installs it.
